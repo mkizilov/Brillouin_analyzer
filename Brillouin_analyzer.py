@@ -25,7 +25,7 @@ from tqdm.contrib import itertools
 
 warnings.filterwarnings("ignore")
 
-def plot_raw_spectra(array, x, y, z):
+def plot_raw_spectrum(array, x, y, z):
     plt.figure(figsize=(12, 7))
     plt.plot(array[x, y, z])
     plt.title(f"Raw Brillouin Spectrum at (x={x}, y={y}, z={z})")
@@ -34,7 +34,7 @@ def plot_raw_spectra(array, x, y, z):
     plt.grid(True)
     plt.show()
     
-def parse_brillouin_directory(directory, label):
+def parse_brillouin_set(directory, label):
     # Initialize a dictionary to store the data temporarily
     data_dict = {}
 
@@ -76,7 +76,7 @@ def parse_brillouin_directory(directory, label):
 
     return brillouin_spectra
 
-def analyze_brillouin(
+def analyze_brillouin_spectrum(
     brillouin_spectra, x, y, z, FSR=29.95, shift_range=(7.2, 7.4),
     shift_tolerance = 0.3, # How different the shifts can be from the median shift
     prominence_range=(0, 100), prominence_step=20,
@@ -84,11 +84,13 @@ def analyze_brillouin(
     height_tolerance=4,  # How different the brilluen peak heights can be from the laser peak height
     symmetry_tolerance = 0.2,  # Tolerance for distance symmetry for Brillouin peaks before fitting
     FSR_tolerance = 0.2,  # Tolerance for the Free Spectral Range (FSR) in GHz
+    peak_height_tolerance = 4,  # How different the peak heights can be from each other (laser-laser, brillouin-brillouin)
     max_exclusions=3,  # Maximum number of peaks to exclude  # 20% tolerance
     min_laser_peaks = 3,
     min_peak_distance = 25,  # Minimum distance between peaks
+    cut_spectrum = (800, 1600), #  # Cut off the spectrum
     make_plot=True
-):
+    ):
     """
     This function extracts the Brillouin spectrum at the given (x, y, z) coordinates, rescales the X-axis
     using a quadratic fit (y = ax^2 + bx + c) with constraints to ensure monotonicity,
@@ -130,11 +132,10 @@ def analyze_brillouin(
     # Substitute negative values with zeros
     spectrum[spectrum < 0] = 0
     
-    laser_height_tolerance = 4
+    # Cut off spectrum
+    if cut_spectrum:
+        spectrum = spectrum[cut_spectrum[0]:cut_spectrum[1]]
     
-    # Cut off beginning
-    # spectrum = spectrum[400:]
-    spectrum=spectrum[800:]
     # Remove baseline
     spectrum = spectrum - np.min(spectrum)
 
@@ -186,31 +187,15 @@ def analyze_brillouin(
         else:
             # Find all possible combinations of peaks to exclude at this exclusion level
             # First, we need to find all peaks with any prominence and height (broadest search)
-
-            
-            # Calculate the prominences for the broad peaks
-
-            
-            # # Find all combinations of peaks to exclude at this exclusion level
-            # excluded_combinations = list(combinations(all_broad_peaks, exclusion_level))
-
-            # # Sort the combinations based on the sum of the prominences of excluded peaks
-            # excluded_combinations = sorted(
-            #     excluded_combinations,
-            #     key=lambda combo: sum([all_prominences[np.where(all_broad_peaks == peak)[0][0]] for peak in combo]))
-            
-            
             # # Sort peaks by their prominence (least prominent first)
             sorted_peaks_by_prominence = [x for _, x in sorted(zip(all_prominences, all_broad_peaks))]
 
             # Find all combinations of peaks to exclude at this exclusion level
             excluded_combinations = list(combinations(sorted_peaks_by_prominence, exclusion_level))
 
-            # Sort the combinations based on the prominence of the first excluded peak in each combination
-            excluded_combinations = sorted(
-                excluded_combinations,
-                key=lambda combo: all_prominences[np.where(all_broad_peaks == combo[0])[0][0]] if combo else 0
-            )
+            # Sort the combinations based on the sum of the prominences of excluded peaks            
+            excluded_combinations = sorted(excluded_combinations,
+            key=lambda combo: sum([all_prominences[np.where(all_broad_peaks == peak)[0][0]] for peak in combo]))
 
         
 
@@ -272,12 +257,6 @@ def analyze_brillouin(
                                 laser_peak_height = spectrum[idx]
                                 brillouin_left_height = spectrum[left_idx]
                                 brillouin_right_height = spectrum[right_idx]
-                                
-                                # Find laser peak heights as scipy property
-                                # laser_peak_height = properties["peak_heights"][np.where(peaks == idx)][0]
-                                # brillouin_left_height = properties["peak_heights"][np.where(peaks == left_idx)][0]
-                                # brillouin_right_height = properties["peak_heights"][np.where(peaks == right_idx)][0]
-                                
 
                                 # Check if Brillouin peaks are within ±300% of the laser peak height
                                 # This means Brillouin peak height should be between 25% and 400% of the laser peak height
@@ -295,26 +274,6 @@ def analyze_brillouin(
                                 # Ensure that the distances are approximately equal within the specified tolerance
                                 if not symmetry_tolerance <= (d_left / d_right) <= 1/symmetry_tolerance:
                                     continue
-                                
-                                # Check if the brilluen peaks fwhm are within 0.2 and 0.8
-                                # widths_left = peak_widths(spectrum, [left_idx], rel_height=0.5)
-                                # fwhm_left = widths_left[0][0] * np.abs(x_axis[1] - x_axis[0])
-                                # widths_right = peak_widths(spectrum, [right_idx], rel_height=0.5)
-                                # fwhm_right = widths_right[0][0] * np.abs(x_axis[1] - x_axis[0])
-                                # avg_fwhm = np.median([fwhm_left, fwhm_right])
-                                # if not 0.2 <= avg_fwhm <= 1:
-                                #     continue
-                                
-                                # If scipy find peak bases sizes of the peaks are more than 300% different, skip
-                                # bases_left_left = properties["left_bases"][np.where(peaks == left_idx)][0]
-                                # bases_left_right = properties["right_bases"][np.where(peaks == left_idx)][0]
-                                # bases_left_avg = np.mean([bases_left_left, bases_left_right])
-                                # bases_right_left = properties["left_bases"][np.where(peaks == right_idx)][0]
-                                # bases_right_right = properties["right_bases"][np.where(peaks == right_idx)][0]
-                                # bases_right_avg = np.mean([bases_right_left, bases_right_right])
-                                # if not (0.2 <= bases_left_avg / bases_right_avg <= 5):
-                                #     print('bases')
-                                #     continue
                             
                                 # If both criteria are met, assign the peaks
                                 laser_peaks_indices.append(idx)
@@ -339,12 +298,12 @@ def analyze_brillouin(
                     
                     # Height (signal) between all laser peaks should be not more than 5 times different
                     laser_heights = [spectrum[idx] for idx in laser_peaks_indices]
-                    if not max(laser_heights) / min(laser_heights) <= laser_height_tolerance:
+                    if not max(laser_heights) / min(laser_heights) <= peak_height_tolerance:
                         continue
                     
                     # Same for brillouin peaks
                     brillouin_heights = [spectrum[idx] for idx in brillouin_peaks_indices]
-                    if not max(brillouin_heights) / min(brillouin_heights) <= laser_height_tolerance:
+                    if not max(brillouin_heights) / min(brillouin_heights) <= peak_height_tolerance:
                         continue
                     
                     # Rescale X-axis using the fitted quadratic polynomial y = a*x^2 + b*x + c
@@ -654,11 +613,7 @@ def analyze_brillouin(
                     
         # *** End: Annotate Distances Between Brillouin and Laser Peaks ***
         
-        
-        
-        
-        
-        
+
         # Plot green vertical lines at the laser peak positions
         for lp_idx in best_laser_peaks_indices:
             lp_pos = best_rescaled_x_axis[lp_idx]
@@ -695,8 +650,21 @@ def analyze_brillouin(
         plt.show()
         
 
-    return df
-
+        # Return information for refitting
+    return {
+        'df': df,
+        'spectrum': spectrum,
+        'laser_peaks_indices': best_laser_peaks_indices,
+        'brillouin_peaks_indices': best_brillouin_peaks_indices,
+        'fit_params': (best_a, best_b, best_c),
+        'rescaled_x_axis': best_rescaled_x_axis,
+        'shifts': best_shifts,
+        'fwhms': best_fwhms,
+        'fwhms_left_list': best_fwhms_left_list,
+        'fwhms_right_list': best_fwhms_right_list,
+        'left_shifts': best_left_shifts,
+        'right_shifts': best_right_shifts
+    }
 
 # Define a handler for timeouts
 def timeout_handler(signum, frame):
@@ -705,55 +673,50 @@ def timeout_handler(signum, frame):
 # Set the signal to call timeout_handler after a specified timeout period
 signal.signal(signal.SIGALRM, timeout_handler)
 
-def get_brillouin_peaks_2d_list(brillouin_spectra, z, shift_range, shift_tolerance, prominence_range, prominence_step, height_range, height_step, height_tolerance=15, symmetry_tolerance=0.5, FSR=29.95, FSR_tolerance = 0.2, max_exclusions=4, timeout_seconds=20):
-    """
-    This function calculates the Brillouin shift and FWHM for each (x, y) point at a given Z position in the Brillouin spectra.
-    
-    Parameters:
-    brillouin_spectra (np.ndarray): 3D array containing the Brillouin spectra (with shape [x, y, z]).
-    z (int): The Z-coordinate for which to calculate the shift and FWHM maps.
-    shift_range (tuple): The expected range of Brillouin shifts.
-    prominence_range (tuple): Range of prominence values (min, max) for peak detection.
-    prominence_step (float): Step size for prominence.
-    height_range (tuple): Range of height values (min, max) for peak detection.
-    height_step (float): Step size for height.
-    FSR (float): Free Spectral Range (Hz). Default is 29.95 Hz.
-    timeout_seconds (int): Time limit in seconds for the calculation of each (x, y) point.
-    
-    Returns:
-    shift_map (np.ndarray): 2D array containing the Brillouin shift for each (x, y) point.
-    fwhm_map (np.ndarray): 2D array containing the FWHM for each (x, y) point.
-    """
-    
+def analyze_brillouin_spectra(
+    brillouin_spectra, z, shift_range, shift_tolerance, prominence_range, prominence_step,
+    height_range, height_step, height_tolerance=15, symmetry_tolerance=0.5, FSR=29.95, cut_spectrum = None, peak_height_tolerance = 4,
+    FSR_tolerance=0.2, max_exclusions=4, timeout_seconds=20, refit=False, fix_c=False, save_extra=False
+):
     # Get the dimensions of the 3D Brillouin spectra
     x_dim, y_dim, z_dim = brillouin_spectra.shape
-    
+
     if z >= z_dim:
         print(f"Z-coordinate {z} is out of bounds.")
-        return None, None
-    
-    # Initialize 2D arrays to store the shifts and FWHM
-    # shift_map = np.full((x_dim, y_dim), np.nan)
-    # fwhm_map = np.full((x_dim, y_dim), np.nan)
-    
+        return None
+
     peaks_map = {}
+
+    # Use a simple progress bar without the overhead of tqdm
+    total_pixels = x_dim * y_dim
+    print(f"Processing {total_pixels} pixels...")
+
+    pbar = tqdm(itertools.product(range(x_dim), range(y_dim)), desc="Processing Brillouin Shift and FWHM", total=x_dim*y_dim)
     
-    # pbar = tqdm(itertools.product(range(x_dim), range(y_dim)), desc="Processing Brillouin Shift and FWHM")
-    pbar = tqdm(itertools.product(range(x_dim), range(y_dim)), desc="Processing Brillouin Shift and FWHM}", total=x_dim*y_dim)
+    # Initialize lists for global refit
+    x_all = []
+    y_all = []
+    pixel_indices = []
+    pixel_id_map = {}
+    current_pixel_id = 0
+    pixel_id_reverse_map = {}  # Map from pixel_id to (x, y)
+    best_a_list = []
+    best_b_list = []
+    best_c_list = []
+
     # Loop through each (x, y) coordinate at the specified Z position
-    for x, y in pbar:
+    for x_coord, y_coord in pbar:
         # Add tqdm message about what processing (x, y)
-        pbar.set_description(f"Processing Brillouin Shift and FWHM at (x={x}, y={y}, z={z})", refresh=True)
-        
+        pbar.set_description(f"Processing at (x={x_coord}, y={y_coord}, z={z})", refresh=True)
         try:
             # Set an alarm to trigger a timeout after `timeout_seconds`
             signal.alarm(timeout_seconds)
-            
-            # Get the DataFrame containing the Brillouin peaks data for the current (x, y, z) position
-            df_peaks = analyze_brillouin(
+
+            # Get the result containing the Brillouin peaks data for the current (x, y, z) position
+            result = analyze_brillouin_spectrum(
                 brillouin_spectra=brillouin_spectra,
-                x=x,
-                y=y,
+                x=x_coord,
+                y=y_coord,
                 z=z,
                 shift_range=shift_range,
                 shift_tolerance=shift_tolerance,
@@ -766,25 +729,320 @@ def get_brillouin_peaks_2d_list(brillouin_spectra, z, shift_range, shift_toleran
                 FSR=FSR,
                 FSR_tolerance=FSR_tolerance,
                 max_exclusions=max_exclusions,
+                cut_spectrum = cut_spectrum,
+                peak_height_tolerance = peak_height_tolerance,
                 make_plot=False
             )
-            
+
             # Reset the alarm after successful calculation
             signal.alarm(0)
-            
-            # Check if the DataFrame is valid and has data
-            if df_peaks is not None:
-                peaks_map[x, y] = df_peaks
+
+            # Check if the result is valid and has data
+            if (result is not None) and ('laser_peaks_indices' in result):
+                peaks_map[(x_coord, y_coord)] = result
+                # Assign pixel ID
+                pixel_id_map[(x_coord, y_coord)] = current_pixel_id
+                pixel_id_reverse_map[current_pixel_id] = (x_coord, y_coord)
+                current_pixel_id += 1
+
+                # Collect individual fit_params
+                fit_params = result['fit_params']
+                best_a, best_b, best_c = fit_params
+                best_a_list.append(best_a)
+                best_b_list.append(best_b)
+                best_c_list.append(best_c)
+
+                # Collect data for global refit
+                laser_peaks_indices = result['laser_peaks_indices']
+                N_laser_peaks = len(laser_peaks_indices)
+                if N_laser_peaks < 3:
+                    continue  # Skip if not enough laser peaks
+
+                # Expected positions (start from zero for each pixel)
+                y_expected = np.arange(N_laser_peaks) * FSR
+
+                x_indices = laser_peaks_indices
+
+                # Append raw indices without shifting
+                x_all.extend(x_indices)
+                y_all.extend(y_expected)
+                pixel_indices.extend([pixel_id_map[(x_coord, y_coord)]] * N_laser_peaks)
             else:
                 # If no valid data is found, assign NaN
-                peaks_map[x, y] = np.nan
-
+                peaks_map[(x_coord, y_coord)] = np.nan
 
         except TimeoutError:
             # If the calculation takes longer than `timeout_seconds`, assign NaN
-            # print(f"Timeout at (x={x}, y={y}, z={z})")
+            peaks_map[(x_coord, y_coord)] = np.nan
             # Reset the alarm to avoid accidental triggers
             signal.alarm(0)
+
+    if refit:
+        print("Performing global refit...")
+        # Convert lists to numpy arrays
+        x_all = np.array(x_all)
+        y_all = np.array(y_all)
+        pixel_indices = np.array(pixel_indices)
+        N_pixels = current_pixel_id
+
+        # Precompute x_all squared
+        x_all_squared = x_all ** 2
+
+        # Define the residual function for global least squares fitting
+        if fix_c:
+            # If c is fixed, it will be the same for all pixels
+            def global_residuals(params, x_all_squared, x_all, y_all):
+                a = params[0]
+                b = params[1]
+                c = params[2]  # Single c value for all pixels
+                rescaled_x = a * x_all_squared + b * x_all + c
+                residuals = y_all - rescaled_x
+                return residuals
+            
+            # Initial guess using medians from individual fits
+            a_initial = np.median(best_a_list) if best_a_list else 1e-16
+            b_initial = np.median(best_b_list) if best_b_list else 1e-16
+            c_initial = np.median(best_c_list) if best_c_list else 0
+            initial_guess = [a_initial, b_initial, c_initial]
+
+            # Bounds for fixed c
+            lower_bounds = [1e-16, 1e-16, -np.inf]
+            upper_bounds = [np.inf, np.inf, np.inf]
+
+            # Perform global least squares fitting
+            result = least_squares(
+                global_residuals,
+                x0=initial_guess,
+                bounds=(lower_bounds, upper_bounds),
+                args=(x_all_squared, x_all, y_all)
+            )
+
+        else:
+            # If c is not fixed, use pixel-specific offsets
+            def global_residuals(params, x_all_squared, x_all, y_all, pixel_indices):
+                a = params[0]
+                b = params[1]
+                c_p = params[2:]  # Pixel-specific offsets
+                rescaled_x = a * x_all_squared + b * x_all + c_p[pixel_indices]
+                residuals = y_all - rescaled_x
+                return residuals
+            
+            # Initial guess using medians from individual fits
+            a_initial = np.median(best_a_list) if best_a_list else 1e-16
+            b_initial = np.median(best_b_list) if best_b_list else 1e-16
+            c_initial = np.array(best_c_list) if best_c_list else np.zeros(N_pixels)
+            initial_guess = np.concatenate(([a_initial, b_initial], c_initial))
+
+            # Bounds for pixel-specific c
+            lower_bounds = np.concatenate(([1e-16, 1e-16], np.full(N_pixels, -np.inf)))
+            upper_bounds = np.concatenate(([np.inf, np.inf], np.full(N_pixels, np.inf)))
+
+            # Perform global least squares fitting
+            result = least_squares(
+                global_residuals,
+                x0=initial_guess,
+                bounds=(lower_bounds, upper_bounds),
+                args=(x_all_squared, x_all, y_all, pixel_indices)
+            )
+
+        if result.success:
+            print("Global refit successful.")
+            optimized_params = result.x
+            a_global = optimized_params[0]
+            b_global = optimized_params[1]
+
+            if fix_c:
+                c_global = optimized_params[2]
+                c_p_global = np.full(N_pixels, c_global)  # All pixels use the same value for c
+            else:
+                c_p_global = optimized_params[2:]  # Pixel-specific offsets
+
+            # Initialize dictionaries to store computed values
+            pixel_shifts = {}
+            pixel_left_shifts = {}
+            pixel_right_shifts = {}
+            pixel_fwhms = {}
+            pixel_fwhms_left = {}
+            pixel_fwhms_right = {}
+            rescaled_x_axes = {}
+
+            # Loop over pixels to compute rescaled x-axes
+            for pixel_id in range(N_pixels):
+                x_coord, y_coord = pixel_id_reverse_map[pixel_id]
+                c_p = c_p_global[pixel_id]
+                
+                pixel_result = peaks_map[(x_coord, y_coord)]
+                spectrum = pixel_result['spectrum']
+                spectrum_length = len(spectrum)
+                x_axis = np.arange(spectrum_length)
+                x_axis_squared = x_axis ** 2
+                
+                rescaled_x_axis = a_global * x_axis_squared + b_global * x_axis + c_p
+                rescaled_x_axes[(x_coord, y_coord)] = rescaled_x_axis
+
+            # Collect all data for batch processing
+            all_lp_indices = []
+            all_left_bp_indices = []
+            all_right_bp_indices = []
+            all_rescaled_x_axes = []
+            all_spectra = []
+            all_pixel_keys = []
+            all_pixel_ids = []
+
+            for pixel_id in range(N_pixels):
+                x_coord, y_coord = pixel_id_reverse_map[pixel_id]
+                pixel_key = (x_coord, y_coord)
+                pixel_result = peaks_map[pixel_key]
+                rescaled_x_axis = rescaled_x_axes[pixel_key]
+                spectrum = pixel_result['spectrum']
+                laser_peaks_indices = pixel_result['laser_peaks_indices']
+                brillouin_peaks_indices = pixel_result['brillouin_peaks_indices']
+                N_laser_peaks = len(laser_peaks_indices)
+
+                # Collect indices
+                lp_indices = laser_peaks_indices
+                left_bp_indices = brillouin_peaks_indices[::2]
+                right_bp_indices = brillouin_peaks_indices[1::2]
+
+                all_lp_indices.extend(lp_indices)
+                all_left_bp_indices.extend(left_bp_indices)
+                all_right_bp_indices.extend(right_bp_indices)
+                all_rescaled_x_axes.extend([rescaled_x_axis] * N_laser_peaks)
+                all_spectra.extend([spectrum] * N_laser_peaks)
+                all_pixel_keys.extend([pixel_key] * N_laser_peaks)
+                all_pixel_ids.extend([pixel_id] * N_laser_peaks)
+
+            # Convert to NumPy arrays
+            all_lp_indices = np.array(all_lp_indices)
+            all_left_bp_indices = np.array(all_left_bp_indices)
+            all_right_bp_indices = np.array(all_right_bp_indices)
+            all_rescaled_x_axes = np.array(all_rescaled_x_axes)
+            all_spectra = np.array(all_spectra)
+            all_pixel_ids = np.array(all_pixel_ids)
+
+        lp_positions = []
+        left_bp_positions = []
+        right_bp_positions = []
+        delta_x_list = []
+
+        for i in range(len(all_lp_indices)):
+            rescaled_x_axis = all_rescaled_x_axes[i]
+            lp_idx = all_lp_indices[i]
+            left_bp_idx = all_left_bp_indices[i]
+            right_bp_idx = all_right_bp_indices[i]
+
+            # Ensure indices are within bounds
+            if lp_idx >= len(rescaled_x_axis) or left_bp_idx >= len(rescaled_x_axis) or right_bp_idx >= len(rescaled_x_axis):
+                continue  # Skip this iteration if indices are out of bounds
+
+            # Get positions
+            lp_positions.append(rescaled_x_axis[lp_idx])
+            left_bp_positions.append(rescaled_x_axis[left_bp_idx])
+            right_bp_positions.append(rescaled_x_axis[right_bp_idx])
+
+            # Compute delta_x for FWHM calculation
+            if len(rescaled_x_axis) > 1:
+                delta_x = np.abs(rescaled_x_axis[1] - rescaled_x_axis[0])
+            else:
+                delta_x = 0  # Avoid division by zero or invalid delta_x
+            delta_x_list.append(delta_x)
+
+        lp_positions = np.array(lp_positions)
+        left_bp_positions = np.array(left_bp_positions)
+        right_bp_positions = np.array(right_bp_positions)
+        delta_x_list = np.array(delta_x_list)
+
+        # Check if we have valid positions
+        if len(lp_positions) == 0 or len(left_bp_positions) == 0 or len(right_bp_positions) == 0:
+            print("No valid positions found after refitting.")
+            return peaks_map
+
+        left_shifts = lp_positions - left_bp_positions
+        right_shifts = right_bp_positions - lp_positions
+        shifts = (right_bp_positions - left_bp_positions) / 2
+
+        # Compute FWHMs
+        fwhms_left = []
+        fwhms_right = []
+        for i in range(len(all_spectra)):
+            spectrum = all_spectra[i]
+            left_bp_idx = all_left_bp_indices[i]
+            right_bp_idx = all_right_bp_indices[i]
+            delta_x = delta_x_list[i]
+
+            # Ensure delta_x is valid
+            if delta_x == 0:
+                fwhms_left.append(np.nan)
+                fwhms_right.append(np.nan)
+                continue
+
+            widths_left = peak_widths(spectrum, [left_bp_idx], rel_height=0.5)
+            fwhm_left = widths_left[0][0] * delta_x
+            fwhms_left.append(fwhm_left)
+
+            widths_right = peak_widths(spectrum, [right_bp_idx], rel_height=0.5)
+            fwhm_right = widths_right[0][0] * delta_x
+            fwhms_right.append(fwhm_right)
+
+        fwhms_left = np.array(fwhms_left)
+        fwhms_right = np.array(fwhms_right)
+        fwhms = (fwhms_left + fwhms_right) / 2
+
+        # Group the computed values by pixel and update DataFrames
+        pixel_shifts = {}
+        pixel_left_shifts = {}
+        pixel_right_shifts = {}
+        pixel_fwhms = {}
+        pixel_fwhms_left = {}
+        pixel_fwhms_right = {}
+
+        for i in range(len(all_pixel_keys)):
+            pixel_key = all_pixel_keys[i]
+            if pixel_key not in pixel_shifts:
+                pixel_shifts[pixel_key] = []
+                pixel_left_shifts[pixel_key] = []
+                pixel_right_shifts[pixel_key] = []
+                pixel_fwhms[pixel_key] = []
+                pixel_fwhms_left[pixel_key] = []
+                pixel_fwhms_right[pixel_key] = []
+
+            pixel_shifts[pixel_key].append(shifts[i])
+            pixel_left_shifts[pixel_key].append(left_shifts[i])
+            pixel_right_shifts[pixel_key].append(right_shifts[i])
+            pixel_fwhms[pixel_key].append(fwhms[i])
+            pixel_fwhms_left[pixel_key].append(fwhms_left[i])
+            pixel_fwhms_right[pixel_key].append(fwhms_right[i])
+
+        # Update DataFrames
+        for pixel_key in pixel_shifts.keys():
+            pixel_result = peaks_map[pixel_key]
+            df = pixel_result['df']
+
+            # Ensure the lengths match before assignment
+            num_laser_peaks = len(pixel_shifts[pixel_key])
+            df_laser = df[df['Peak Type'] == 'Laser']
+            df_brillouin_left = df[df['Peak Type'] == 'Brillouin Left']
+            df_brillouin_right = df[df['Peak Type'] == 'Brillouin Right']
+
+            if len(df_laser) == num_laser_peaks:
+                df.loc[df['Peak Type'] == 'Laser', 'Shift'] = pixel_shifts[pixel_key]
+                df.loc[df['Peak Type'] == 'Laser', 'FWHM'] = pixel_fwhms[pixel_key]
+                df.loc[df['Peak Type'] == 'Brillouin Left', 'Shift'] = pixel_left_shifts[pixel_key]
+                df.loc[df['Peak Type'] == 'Brillouin Left', 'FWHM'] = pixel_fwhms_left[pixel_key]
+                df.loc[df['Peak Type'] == 'Brillouin Right', 'Shift'] = pixel_right_shifts[pixel_key]
+                df.loc[df['Peak Type'] == 'Brillouin Right', 'FWHM'] = pixel_fwhms_right[pixel_key]
+            else:
+                print(f"Mismatch in data lengths for pixel {pixel_key}. Skipping update.")
+
+            # Update the peaks_map
+            pixel_result['df'] = df
+            if save_extra:
+                pixel_result['rescaled_x_axis'] = rescaled_x_axes[pixel_key]
+                if fix_c:
+                    pixel_result['fit_params'] = (a_global, b_global, c_global)
+                else:
+                    pixel_result['fit_params'] = (a_global, b_global, c_p_global[pixel_id_map[pixel_key]])
+            peaks_map[pixel_key] = pixel_result
 
     return peaks_map
 
@@ -862,7 +1120,107 @@ def extract_first(df_map, data_type="shift"):
                     data_map[i, j] = first_two_peaks["FWHM"].mean()
     return data_map
 
-def plot_brillouin_heatmap(df_list, title, data_type="shift", peaks='all',pixel_size = 1, apply_median_filter=False, median_filter_size=3,
+def convert_to_df_map(peaks_map):
+    """
+    Convert the output from get_brillouin_peaks_2d_list into a df_map format.
+
+    Parameters:
+    -----------
+    peaks_map : dict
+        Dictionary returned by get_brillouin_peaks_2d_list where keys are (x, y) coordinates and values are dictionaries.
+
+    Returns:
+    --------
+    df_map : dict
+        A dictionary where keys are (x, y) tuples and values are DataFrames or NaNs.
+    """
+    df_map = {}
+    # Check if DataFrames already extracted
+    
+    # Loop through the peaks_map and extract the DataFrames
+    for (x, y), result in peaks_map.items():
+        if result is not None and isinstance(result, dict) and 'df' in result:
+            df_map[(x, y)] = result['df']  # Extract the DataFrame
+        else:
+            df_map[(x, y)] = np.nan  # If no DataFrame exists, mark it as NaN
+
+    return df_map
+
+def extract_median_values(df_map, data_type="shift"):
+    """
+    Extracts the median "Shift" or "FWHM" values from a dictionary of DataFrames or NaNs.
+    
+    Parameters:
+    -----------
+    df_map : dict
+        A dictionary where keys are tuples (x, y) and values are DataFrames or NaNs.
+    data_type : str, optional
+        Specifies which data to extract: "shift" or "fwhm". Default is "shift".
+        
+    Returns:
+    --------
+    np.ndarray
+        A 2D array containing the extracted median values.
+    """
+    # Get the dimensions of the data
+    x_dim = max([key[0] for key in df_map.keys()]) + 1
+    y_dim = max([key[1] for key in df_map.keys()]) + 1
+    
+    # Initialize an array with NaN values
+    data_map = np.full((x_dim, y_dim), np.nan)
+    
+    # Loop over the dictionary and extract values
+    for (i, j), df in df_map.items():
+        if df is not None and not isinstance(df, float) and not df.empty:
+            # Extract "Shift" or "FWHM" based on the data_type
+            brillouin_peaks = df[df["Peak Type"].str.contains("Brillouin")]
+            if not brillouin_peaks.empty:
+                if data_type == "shift":
+                    data_map[i, j] = brillouin_peaks["Shift"].median()
+                elif data_type == "fwhm":
+                    data_map[i, j] = brillouin_peaks["FWHM"].median()
+    return data_map
+
+def extract_first(df_map, data_type="shift"):
+    """
+    Extracts the median "Shift" or "FWHM" values from the first two Brillouin peaks (Stokes and Anti-Stokes)
+    from a dictionary of DataFrames or NaNs.
+    
+    Parameters:
+    -----------
+    df_map : dict
+        A dictionary where keys are tuples (x, y) and values are DataFrames or NaNs.
+    data_type : str, optional
+        Specifies which data to extract: "shift" or "fwhm". Default is "shift".
+        
+    Returns:
+    --------
+    np.ndarray
+        A 2D array containing the extracted median values from the first two Brillouin peaks.
+    """
+    # Get the dimensions of the data
+    x_dim = max([key[0] for key in df_map.keys()]) + 1
+    y_dim = max([key[1] for key in df_map.keys()]) + 1
+    
+    # Initialize an array with NaN values
+    data_map = np.full((x_dim, y_dim), np.nan)
+    
+    # Loop over the dictionary and extract values from the first two Brillouin peaks
+    for (i, j), df in df_map.items():
+        if df is not None and not isinstance(df, float) and not df.empty:
+            # Extract "Shift" or "FWHM" for the first two Brillouin peaks (Stokes and Anti-Stokes)
+            brillouin_peaks = df[df["Peak Type"].str.contains("Brillouin")]
+            if len(brillouin_peaks) >= 2:
+                first_two_peaks = brillouin_peaks.iloc[:2]
+                if data_type == "shift":
+                    # Take the mean of the shifts of the first two peaks
+                    data_map[i, j] = first_two_peaks["Shift"].mean()
+                elif data_type == "fwhm":
+                    # Take the mean of the FWHM of the first two peaks
+                    data_map[i, j] = first_two_peaks["FWHM"].mean()
+    return data_map
+
+def plot_brillouin_heatmap(df_list, title, data_type="shift", peaks='all', apply_median_filter=False, median_filter_size=3,
                            apply_gaussian_filter=False, gaussian_sigma=1,
                            interpolate_nan=True, colorbar_range=None,
                            cmap='jet', interpolation=None, annotate=True):
@@ -898,6 +1256,7 @@ def plot_brillouin_heatmap(df_list, title, data_type="shift", peaks='all',pixel_
     --------
     None
     """
+    df_list = convert_to_df_map(df_list)
     # Extract median "Shift" or "FWHM" values from the 2D list of DataFrames
     if peaks == 'all':
         data_map = extract_median_values(df_list, data_type=data_type)
@@ -956,22 +1315,12 @@ def plot_brillouin_heatmap(df_list, title, data_type="shift", peaks='all',pixel_
                     vmin=colorbar_range[0] if colorbar_range else None,
                     vmax=colorbar_range[1] if colorbar_range else None, interpolation=interpolation)
     plt.title(title, fontsize=14)
-    plt.xlabel(r"Y Coordinate $\mu m$ ", fontsize=12)
-    plt.ylabel(r"X Coordinate $\mu m$", fontsize=12)
-    # Rescale the x-axis to micrometers
-    x_ticks = np.arange(0, processed_data.shape[1], 5)
-    x_labels = [f"{x * pixel_size:.2f}" for x in x_ticks]
-    plt.xticks(x_ticks, x_labels, rotation=45)
-    # Rescale the y-axis to micrometers
-    y_ticks = np.arange(0, processed_data.shape[0], 5)
-    y_labels = [f"{y * pixel_size:.2f}" for y in y_ticks]
-    plt.yticks(y_ticks, y_labels)
-    
-    
+    plt.xlabel("Y Coordinate", fontsize=12)
+    plt.ylabel("X Coordinate", fontsize=12)
     
     # Add colorbar with label
     cbar = plt.colorbar(im)
-    cbar_label = "Shift (GHz)" if data_type == "shift" else "FWHM (GHz)"
+    cbar_label = "Shift (Hz)" if data_type == "shift" else "FWHM (Hz)"
     cbar.set_label(cbar_label, fontsize=12)
     
     # Optionally annotate statistical information
@@ -987,8 +1336,6 @@ def plot_brillouin_heatmap(df_list, title, data_type="shift", peaks='all',pixel_
     
     plt.tight_layout()
     plt.show()
-    
-    
 def plot_3d_surface_heatmaps(df_maps, z_values, title, data_type="shift", peaks='all', pixel_size=1, 
                              apply_median_filter=False, median_filter_size=3,
                              apply_gaussian_filter=False, gaussian_sigma=1,
@@ -1116,3 +1463,4 @@ def plot_3d_surface_heatmaps(df_maps, z_values, title, data_type="shift", peaks=
     fig.colorbar(mappable, shrink=0.5, aspect=5, label=f'{data_type.capitalize()} (GHz)')
 
     plt.show()
+    Refractor this code. Rename variables to make it easier to understand what they're. Add descriptive print statements. analyze_brillouin_spectra should take all arguments neeeded for analyze_brillouin_spectrum
